@@ -335,6 +335,84 @@ class LogCallback(TrainerCallback):
                 )
                 self.thread_pool.submit(self._write_log, args.output_dir, logs)
 
+class StepJSONLoggerCallback(TrainerCallback):
+    r"""A callback for recording step timestamps to a JSONL file.
+
+    每个训练 step 结束时写一行 JSON：
+    {
+        "ts_ns": <CLOCK_REALTIME ns>,
+        "global_step": <当前 step>,
+        "epoch": <当前 epoch>,
+        "rank": <当前 rank>,
+        "loss": <本次 log 的 loss, 可选>
+    }
+    """
+
+    def __init__(self, output_dir: str, filename: str = "step_timeline.jsonl") -> None:
+        # 输出目录和文件名
+        self.output_dir = output_dir
+        self.filename = filename
+
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # 分布式 rank：从环境变量里拿 (torchrun 会设置 RANK / LOCAL_RANK)
+        rank_env = os.getenv("RANK") or os.getenv("LOCAL_RANK") or "0"
+        try:
+            self.rank = int(rank_env)
+        except ValueError:
+            self.rank = 0
+
+        # 每个 rank 单独一个文件，避免多进程同时写同一个文件
+        base, ext = os.path.splitext(self.filename)
+        self.filepath = os.path.join(self.output_dir, f"{base}_rank{self.rank}{ext}")
+
+        # 行缓冲打开文件
+        self.f = open(self.filepath, "a", encoding="utf-8", buffering=1)
+
+    @override
+    def on_step_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        # 不保存就不写
+        if not args.should_save:
+            return control
+
+        # CLOCK_REALTIME ns 时间戳，对应 ai_events 里 clock_gettime(CLOCK_REALTIME)
+        ts_ns = time.time_ns()
+
+        record: dict[str, Any] = {
+            "ts_ns": int(ts_ns),
+            "global_step": int(state.global_step),
+            "epoch": float(state.epoch or 0.0),
+            "rank": int(self.rank),
+        }
+
+        # 尝试从 log_history 取最近一次的 loss（如果有的话）
+        if state.log_history:
+            last_log = state.log_history[-1]
+            if "loss" in last_log:
+                try:
+                    record["loss"] = float(last_log["loss"])
+                except Exception:
+                    record["loss"] = last_log["loss"]
+
+        # 写一行 JSONL
+        try:
+            self.f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            # 不影响训练，只打印一下
+            logger.warning_rank0(f"StepJSONLoggerCallback write failed: {e}")
+
+        return control
+
+    @override
+    def on_train_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        # 训练结束时关掉文件句柄
+        try:
+            if hasattr(self, "f") and self.f and not self.f.closed:
+                self.f.close()
+        except Exception:
+            pass
+        return control
+
 
 class ReporterCallback(TrainerCallback):
     r"""A callback for reporting training status to external logger."""
