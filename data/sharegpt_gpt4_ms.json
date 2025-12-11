@@ -1,0 +1,3 @@
+{"default":{"train":{"meta":"sharegpt_gpt4.jsonl","file":""},"test":{"meta":"","file":""},"validation":{"meta":"","file":""}},
+"V3_format":{"train":{"meta":"sharegpt_V3_format.jsonl","file":""},"test":{"meta":"","file":""},"validation":{"meta":"","file":""}},
+"zh_38K_format":{"train":{"meta":"sharegpt_zh_38K_format.jsonl","file":""},"test":{"meta":"","file":""},"validation":{"meta":"","file":""}}}

@@ -5,8 +5,14 @@
   "alpaca_en_demo": {
     "file_name": "alpaca_en_demo.json"
   },
+  "alpaca_en_ms": {
+    "file_name": "alpaca_en_ms.json"
+  },
   "alpaca_zh_demo": {
     "file_name": "alpaca_zh_demo.json"
+  },
+  "alpaca_zh_ms": {
+    "file_name": "alpaca_zh_ms.json"
   },
   "glaive_toolcall_en_demo": {
     "file_name": "glaive_toolcall_en_demo.json",
@@ -236,6 +242,10 @@
     "ms_hub_url": "AI-ModelScope/sharegpt_gpt4",
     "formatting": "sharegpt"
   },
+  "sharegpt_gpt4_ms": {
+    "file_name": "sharegpt_gpt4_ms.json",
+    "formatting": "sharegpt"
+  }
   "ultrachat_200k": {
     "hf_hub_url": "HuggingFaceH4/ultrachat_200k",
     "ms_hub_url": "AI-ModelScope/ultrachat_200k",
@@ -277,6 +287,10 @@
   "evol_instruct": {
     "hf_hub_url": "WizardLM/WizardLM_evol_instruct_V2_196k",
     "ms_hub_url": "AI-ModelScope/WizardLM_evol_instruct_V2_196k",
+    "formatting": "sharegpt"
+  },
+  "evol_instruct_196k_ms": {
+    "file_name": "evol_instruct_196k_ms.json",
     "formatting": "sharegpt"
   },
   "glaive_toolcall_100k": {
