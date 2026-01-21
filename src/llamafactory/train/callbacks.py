@@ -338,19 +338,25 @@ class LogCallback(TrainerCallback):
 class StepJSONLoggerCallback(TrainerCallback):
     r"""A callback for recording step timestamps to a JSONL file.
 
-    每个训练 step 结束时写一行 JSON：
+    文件名：step_timeline_<tgid>.jsonl（tgid=pid），目录默认为 output_dir，可用 STEP_TIMELINE_DIR 覆盖。
+
+    每个训练 step 写两行 JSON（begin/end）：
     {
-        "ts_ns": <CLOCK_REALTIME ns>,
+        "phase": "begin" | "end",
+        "start_ts_ns": <CLOCK_REALTIME ns>,  # begin 时为 ts_ns
+        "end_ts_ns": <CLOCK_REALTIME ns>,    # 仅 end 有
+        "ts_ns": <CLOCK_REALTIME ns>,        # begin/end 的时间戳
         "global_step": <当前 step>,
         "epoch": <当前 epoch>,
+        "tgid": <当前进程 pid>,
         "rank": <当前 rank>,
         "loss": <本次 log 的 loss, 可选>
     }
     """
 
     def __init__(self, output_dir: str, filename: str = "step_timeline.jsonl") -> None:
-        # 输出目录和文件名
-        self.output_dir = output_dir
+        # 输出目录和文件名（可用 STEP_TIMELINE_DIR 覆盖）
+        self.output_dir = os.getenv("STEP_TIMELINE_DIR") or output_dir
         self.filename = filename
 
         os.makedirs(self.output_dir, exist_ok=True)
@@ -362,26 +368,58 @@ class StepJSONLoggerCallback(TrainerCallback):
         except ValueError:
             self.rank = 0
 
-        # 每个 rank 单独一个文件，避免多进程同时写同一个文件
+        self.tgid = os.getpid()
+
+        # 每个进程单独一个文件，避免多进程同时写同一个文件
         base, ext = os.path.splitext(self.filename)
-        self.filepath = os.path.join(self.output_dir, f"{base}_rank{self.rank}{ext}")
+        self.filepath = os.path.join(self.output_dir, f"{base}_{self.tgid}{ext}")
 
         # 行缓冲打开文件
         self.f = open(self.filepath, "a", encoding="utf-8", buffering=1)
+        self._step_start_ns: dict[int, int] = {}
+
+    @override
+    def on_step_begin(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        step_id = int(state.global_step) + 1
+        if step_id not in self._step_start_ns:
+            start_ts_ns = time.time_ns()
+            self._step_start_ns[step_id] = start_ts_ns
+
+            record: dict[str, Any] = {
+                "phase": "begin",
+                "start_ts_ns": int(start_ts_ns),
+                "ts_ns": int(start_ts_ns),
+                "global_step": step_id,
+                "epoch": float(state.epoch or 0.0),
+                "tgid": int(self.tgid),
+                "rank": int(self.rank),
+            }
+
+            try:
+                self.f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            except Exception as e:
+                logger.warning_rank0(f"StepJSONLoggerCallback write failed: {e}")
+        return control
 
     @override
     def on_step_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
-        # 不保存就不写
-        if not args.should_save:
-            return control
-
         # CLOCK_REALTIME ns 时间戳，对应 ai_events 里 clock_gettime(CLOCK_REALTIME)
-        ts_ns = time.time_ns()
+        end_ts_ns = time.time_ns()
+        step_id = int(state.global_step)
+        start_ts_ns = self._step_start_ns.pop(step_id, None)
+        if start_ts_ns is None:
+            start_ts_ns = self._step_start_ns.pop(step_id + 1, None)
+        if start_ts_ns is None:
+            start_ts_ns = end_ts_ns
 
         record: dict[str, Any] = {
-            "ts_ns": int(ts_ns),
-            "global_step": int(state.global_step),
+            "phase": "end",
+            "start_ts_ns": int(start_ts_ns),
+            "end_ts_ns": int(end_ts_ns),
+            "ts_ns": int(end_ts_ns),
+            "global_step": step_id,
             "epoch": float(state.epoch or 0.0),
+            "tgid": int(self.tgid),
             "rank": int(self.rank),
         }
 
